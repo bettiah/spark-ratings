@@ -7,8 +7,12 @@ import org.apache.spark.sql.functions;
 
 public class MovieRatings {
 
-    private static final String TITLE_RATINGS = "files/title.ratings.tsv.gz";
-    private static final String TITLE_BASICS = "files/title.basics.tsv.gz";
+    private static final String LOAD_PREFIX = "/Users/me/Downloads/";
+    private static final String TITLE_RATINGS = "title.ratings.tsv.gz";
+    private static final String TITLE_BASICS = "title.basics.tsv.gz";
+    private static final String TITLE_AKAS = "title.akas.tsv.gz";
+    private static final String TITLE_PRINCIPALS = "title.principals.tsv.gz";
+    private static final String NAME_BASICS = "name.basics.tsv.gz";
 
     public static Dataset<Row> loadFile(SparkSession spark, String name) {
         return spark
@@ -16,7 +20,7 @@ public class MovieRatings {
                 .format("csv")
                 .option("header", "true")
                 .option("delimiter", "\t")
-                .load(name);
+                .load(LOAD_PREFIX + name);
     }
 
     public static void main(String[] args) {
@@ -36,7 +40,8 @@ public class MovieRatings {
                 .cache();
         movies.show();
 
-        // 1: Retrieve the top 10 movies with a minimum of 500 votes with the ranking determined by:
+        // 1:
+        // Retrieve the top 10 movies with a minimum of 500 votes with the ranking determined by:
         // (numVotes/averageNumberOfVotes) * averageRating
 
         // get average number of votes for all movies
@@ -54,11 +59,55 @@ public class MovieRatings {
                                 .divide(averageNumberOfVotes)
                                 .multiply(functions.col("averageRating")))
                 .sort(functions.desc("rank"))
-                .limit(10);
+                .limit(10)
+                .cache();
 
         ranked.show();
 
         ranked.select("primaryTitle").show();
+
+        // 2.
+        // For these 10 movies, list the persons who are most often credited
+        // and
+        // list the different titles of the 10 movies.
+
+//
+//        Dataset<Row> credits = loadFile(spark, TITLE_PRINCIPALS);
+//        ranked
+//                .join(credits, "tconst")
+//                .groupBy("tconst")
+//                .agg(functions.count("nconst").as("count"))
+////                .sort(functions.desc("count"))
+//                .show();
+
+
+        //
+        Dataset<Row> names = loadFile(spark, NAME_BASICS)
+                .select(
+                        functions.col("nconst"),
+                        functions.col("primaryName"),
+                        functions.explode(functions.split(functions.col("knownForTitles"), ",")).as("tconst")
+                );
+
+        names.groupBy("nconst")
+                .agg(functions.count("tconst").as("count"))
+                .show();
+
+        ranked
+                .join(names, "tconst")
+                .select("primaryTitle", "primaryName", "nconst")
+                .show();
+
+        // list the different titles of the 10 movies
+        Dataset<Row> akas = loadFile(spark, TITLE_AKAS).withColumnRenamed("titleId", "tconst");
+
+        ranked
+                .join(akas, "tconst")
+                .groupBy("tconst", "rank", "primaryTitle")
+                .agg(functions.collect_list("title").as("titles"))
+                .sort(functions.desc("rank"))
+                .select("primaryTitle", "titles")
+                .show(false);
 
         spark.stop();
     }
