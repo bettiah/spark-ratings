@@ -20,19 +20,20 @@ public class MovieRatings {
                 .format("csv")
                 .option("header", "true")
                 .option("delimiter", "\t")
-                .load(LOAD_PREFIX + name);
+                .option("nullValue", "\\N")
+                .load(name);
     }
 
     public static void main(String[] args) {
 
         SparkSession spark = SparkSession.builder()
-                .master("local[4]")
+                .master("local[*]")
                 .appName("Movie Ratings").getOrCreate();
 
-        Dataset<Row> ratings = loadFile(spark, TITLE_RATINGS);
-        Dataset<Row> titles = loadFile(spark, TITLE_BASICS);
+        Dataset<Row> ratings = loadFile(spark, LOAD_PREFIX + TITLE_RATINGS);
+        Dataset<Row> titles = loadFile(spark, LOAD_PREFIX + TITLE_BASICS);
 
-        // select & filter
+        // select & filter for movies
         Dataset<Row> movies = ratings
                 .join(titles, "tconst")
                 .select("tconst", "numVotes", "averageRating", "primaryTitle", "titleType")
@@ -71,18 +72,23 @@ public class MovieRatings {
         // and
         // list the different titles of the 10 movies.
 
-//
-//        Dataset<Row> credits = loadFile(spark, TITLE_PRINCIPALS);
-//        ranked
-//                .join(credits, "tconst")
-//                .groupBy("tconst")
-//                .agg(functions.count("nconst").as("count"))
-////                .sort(functions.desc("count"))
-//                .show();
 
+        // list the different titles of the 10 movies
+        Dataset<Row> akas = loadFile(spark, LOAD_PREFIX + TITLE_AKAS).withColumnRenamed("titleId", "tconst");
 
-        //
-        Dataset<Row> names = loadFile(spark, NAME_BASICS)
+        ranked
+                .join(akas, "tconst")
+                .groupBy("tconst", "rank", "primaryTitle")
+                .agg(functions.collect_list("title").as("titles"))
+                .sort(functions.desc("rank"))
+                .select("primaryTitle", "titles")
+                .show(false);
+
+        // TODO - list the persons who are most often credited
+        // do we need to fetch the people with most knownForTitles in names (max 4)
+        // or
+        // from most mentions for that movie ?
+        Dataset<Row> names = loadFile(spark, LOAD_PREFIX + NAME_BASICS)
                 .select(
                         functions.col("nconst"),
                         functions.col("primaryName"),
@@ -97,17 +103,15 @@ public class MovieRatings {
                 .join(names, "tconst")
                 .select("primaryTitle", "primaryName", "nconst")
                 .show();
+//
+//        Dataset<Row> credits = loadFile(spark, LOAD_PREFIX + TITLE_PRINCIPALS);
+//        ranked
+//                .join(credits, "tconst")
+//                .groupBy("tconst")
+//                .agg(functions.count("nconst").as("count"))
+////                .sort(functions.desc("count"))
+//                .show();
 
-        // list the different titles of the 10 movies
-        Dataset<Row> akas = loadFile(spark, TITLE_AKAS).withColumnRenamed("titleId", "tconst");
-
-        ranked
-                .join(akas, "tconst")
-                .groupBy("tconst", "rank", "primaryTitle")
-                .agg(functions.collect_list("title").as("titles"))
-                .sort(functions.desc("rank"))
-                .select("primaryTitle", "titles")
-                .show(false);
 
         spark.stop();
     }
